@@ -4,6 +4,7 @@ use std::fs;
 use std::path::Path;
 
 mod file;
+mod find;
 mod git;
 mod metadata;
 
