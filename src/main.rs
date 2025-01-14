@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Context};
 use clap::Parser;
 use std::fs;
 use std::path::Path;
@@ -26,6 +27,8 @@ fn main() -> anyhow::Result<()> {
       .unwrap();
     let targets = &package_info.targets;
     for target in targets.iter() {
+      let pwd = target.src_path.parent().with_context(|| anyhow!("not found directory"))?;
+      let crate_types = &target.crate_types;
       let content = fs::read_to_string(&target.src_path)?;
       let file = syn::parse_file(&content)?;
     }
