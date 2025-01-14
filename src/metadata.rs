@@ -4,13 +4,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 /// Cargo.tomlファイルを探す
-pub(crate) fn find_manifest_file(dir: &Path) -> anyhow::Result<PathBuf> {
+pub(crate) fn find_manifest_file(dir: &Path) -> anyhow::Result<(usize, PathBuf)> {
   let manifest_file_name = "Cargo.toml";
   // 見つからなかったら階層を親側に辿る
-  for path in dir.ancestors() {
+  for (i, path) in dir.ancestors().enumerate() {
     let f = path.join(manifest_file_name);
     if let Ok(true) = fs::exists(&f) {
-      return Ok(f);
+      return Ok((i, f));
     }
   }
   Err(anyhow!("Not find Cargo.toml for {}", dir.display()))
