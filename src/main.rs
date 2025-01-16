@@ -106,12 +106,16 @@ fn main() -> anyhow::Result<()> {
       old_module_info_list.push(old_target_module_info);
 
       for old_module_info in old_module_info_list.iter() {
-        let mod_path_str = old_module_info
-          .mod_path
-          .iter()
-          .map(|i| i.to_string())
-          .collect::<Vec<_>>()
-          .join("/");
+        let mod_path_str = if old_module_info.mod_path.is_empty() {
+          "lib".to_string()
+        } else {
+          old_module_info
+            .mod_path
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("/")
+        };
         if let Some(new_module_info) = new_module_info_list
           .iter()
           .find(|info| info.mod_path == old_module_info.mod_path)
