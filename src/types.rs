@@ -1,5 +1,3 @@
-use std::sync::mpsc::Receiver;
-
 use syn::{
   Attribute, Fields, FnArg, Generics, Ident, Item, ReturnType, StaticMutability, Type, Variant,
   Visibility,
@@ -81,6 +79,21 @@ pub(crate) enum ItemTypeData {
   Enum(EnumData),
   Fn(FnData),
   Macro(MacroData),
+}
+
+impl ItemTypeData {
+  pub(crate) fn show_name(&self) -> String {
+    match self {
+      Self::Const(d) => format!("const {}", d.ident),
+      Self::Static(d) => format!("static {}", d.ident),
+      Self::Union(d) => format!("union {}", d.ident),
+      Self::Type(d) => format!("type {}", d.ident),
+      Self::Struct(d) => format!("struct {}", d.ident),
+      Self::Enum(d) => format!("enum {}", d.ident),
+      Self::Fn(d) => format!("fn {}", d.ident),
+      Self::Macro(d) => format!("macro {}", d.ident),
+    }
+  }
 }
 
 /// moduleの中から型情報を抽出する関数

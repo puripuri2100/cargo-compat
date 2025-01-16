@@ -1,5 +1,4 @@
 use anyhow::anyhow;
-use std::fs;
 use std::path::{Path, PathBuf};
 use syn::token::Brace;
 use syn::{Ident, Item, Visibility};
@@ -43,7 +42,7 @@ pub(crate) fn check_mod_file_exists(
   }
 
   Err(anyhow!(
-    "not found child file: {}/{}",
+    "not found child file: {} or {}",
     ed2015_file_path.display(),
     file_path.display()
   ))
@@ -54,17 +53,18 @@ pub(crate) fn check_mod_file_exists(
 pub(crate) struct ModuleInfo {
   /// 階層で区切られたmoduleの名前
   pub mod_path: Vec<Ident>,
-  /// moduleが書いてあるファイルのpath
-  pub module_file_path: PathBuf,
   /// moduleの中身
   pub items: Vec<Item>,
 }
 
 /// 階層が下のモジュールの情報を再帰的に取得する
-pub(crate) fn get_children_modules(
-  pwd: &Path,
+pub(crate) fn get_children_modules<F>(
   module_info: &ModuleInfo,
-) -> anyhow::Result<Vec<ModuleInfo>> {
+  get_children_files: &F,
+) -> anyhow::Result<Vec<ModuleInfo>>
+where
+  F: Fn(&[Ident]) -> anyhow::Result<String>,
+{
   let mut v = Vec::new();
 
   // ファイルに含まれる`mod`から子階層を呼び出す
@@ -75,23 +75,20 @@ pub(crate) fn get_children_modules(
     if let Some((_, contents)) = mod_contents_opt {
       let info = ModuleInfo {
         mod_path: p,
-        module_file_path: module_info.module_file_path.clone(),
         items: contents.clone(),
       };
+      let children = get_children_modules(&info, get_children_files)?;
       v.push(info);
-      let children = get_children_modules(pwd, module_info)?;
       v.extend(children);
     } else {
-      let file_path = check_mod_file_exists(pwd, &p)?;
-      let contents = fs::read_to_string(&file_path)?;
+      let contents = get_children_files(&p)?;
       let file = syn::parse_file(&contents)?;
       let info = ModuleInfo {
         mod_path: p,
-        module_file_path: file_path,
         items: file.items,
       };
+      let children = get_children_modules(&info, get_children_files)?;
       v.push(info);
-      let children = get_children_modules(pwd, module_info)?;
       v.extend(children);
     }
   }

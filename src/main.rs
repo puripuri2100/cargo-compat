@@ -4,9 +4,9 @@ use std::fs;
 use std::path::Path;
 
 mod file;
-mod find;
 mod git;
 mod metadata;
+mod types;
 
 #[derive(Debug, Clone, Parser)]
 struct Args {
@@ -25,7 +25,7 @@ fn main() -> anyhow::Result<()> {
 
   // Cargo.tomlから情報を取る
   let (manifest_dep, manifest_file) = metadata::find_manifest_file(dir)?;
-  let metadata = metadata::manifest_to_metadata(&manifest_file)?;
+  let manifest = metadata::get_manifest_data_from_path(&manifest_file)?;
 
   // git repositoryから比較対象のファイルを取れるようにする
   let (git_repo_dep, git_repo) =
@@ -48,41 +48,100 @@ fn main() -> anyhow::Result<()> {
   let git_path_prefix =
     git::get_diff_between_repo_dir_and_manifest_file(dir, git_repo_dep, manifest_dep);
 
-  for member_id in metadata.workspace_members.iter() {
-    let package_info = metadata
-      .packages
-      .iter()
-      .find(|p| &p.id == member_id)
-      .unwrap();
-    let targets = &package_info.targets;
-    for target in targets.iter() {
-      // libのみを対象とする
-      // 以下参照
-      // - <https://doc.rust-lang.org/reference/linkage.html>
-      // - <https://qiita.com/etoilevi/items/4bd4c5b726e41f5a6689>
-      let crate_types = &target.crate_types;
-      if crate_types.contains(&cargo_metadata::CrateType::Lib)
-        || crate_types.contains(&cargo_metadata::CrateType::StaticLib)
-        || crate_types.contains(&cargo_metadata::CrateType::RLib)
-        || crate_types.contains(&cargo_metadata::CrateType::DyLib)
-        || crate_types.contains(&cargo_metadata::CrateType::CDyLib)
-      {
-        let pwd = target
-          .src_path
-          .parent()
-          .with_context(|| anyhow!("not found directory"))?;
-        let content = fs::read_to_string(&target.src_path)?;
-        let file = syn::parse_file(&content)?;
-        let target_module_info = file::ModuleInfo {
-          mod_path: Vec::new(),
-          module_file_path: target.src_path.clone().into(),
-          items: file.items,
-        };
-        let mut module_info_list =
-          file::get_children_modules(pwd.as_std_path(), &target_module_info)?;
-        module_info_list.push(target_module_info);
+  if manifest.workspace.is_some() {
+    return Err(anyhow!("Not supported for workspaces functionality"));
+  }
+  let lib_file_path = metadata::lib_file_path(&manifest);
+  let pwd = manifest_file.parent().unwrap();
+  let lib_file_result = std::fs::read_to_string(pwd.join(&lib_file_path));
+  if let Ok(lib_file) = lib_file_result {
+    let lib_file_path = pwd.join(lib_file_path);
+    let pwd = &lib_file_path.parent().unwrap();
+
+    let old_manifest_file =
+      git::get_file_contents(&git_path_prefix, Path::new("Cargo.toml"), &tree, &git_repo)?;
+    let old_manifest = metadata::get_manifest_data_from_contents(&old_manifest_file)?;
+    let old_lib_file_path = metadata::lib_file_path(&old_manifest);
+    if let Ok(old_lib_file) = git::get_file_contents(
+      &git_path_prefix,
+      Path::new(&old_lib_file_path),
+      &tree,
+      &git_repo,
+    ) {
+      let new_lib_file = syn::parse_file(&lib_file)?;
+      let new_target_module_info = file::ModuleInfo {
+        mod_path: Vec::new(),
+        items: new_lib_file.items,
+      };
+      let mut new_module_info_list = file::get_children_modules(&new_target_module_info, &|p| {
+        let file_path = file::check_mod_file_exists(pwd, p);
+        match file_path {
+          Ok(file_path) => {
+            let contents = fs::read_to_string(&file_path);
+            match contents {
+              Ok(contents) => Ok(contents),
+              Err(e) => Err(e.into()),
+            }
+          }
+          Err(e) => Err(e),
+        }
+      })?;
+      new_module_info_list.push(new_target_module_info);
+
+      let pwd_old_lib = Path::new(&old_lib_file_path).parent();
+      let src_git_path_prefix = match (&git_path_prefix, pwd_old_lib) {
+        (Some(git), Some(pwd)) => Some(git.join(pwd)),
+        (Some(git), None) => Some(git.clone()),
+        (None, Some(pwd)) => Some(pwd.to_path_buf()),
+        (None, None) => None,
+      };
+      let old_lib_file = syn::parse_file(&old_lib_file)?;
+      let old_target_module_info = file::ModuleInfo {
+        mod_path: Vec::new(),
+        items: old_lib_file.items,
+      };
+      let mut old_module_info_list = file::get_children_modules(&old_target_module_info, &|p| {
+        git::get_mod_file(&src_git_path_prefix, p, &tree, &git_repo)
+      })?;
+      old_module_info_list.push(old_target_module_info);
+
+      for old_module_info in old_module_info_list.iter() {
+        let mod_path_str = old_module_info
+          .mod_path
+          .iter()
+          .map(|i| i.to_string())
+          .collect::<Vec<_>>()
+          .join("/");
+        if let Some(new_module_info) = new_module_info_list
+          .iter()
+          .find(|info| info.mod_path == old_module_info.mod_path)
+        {
+          let old_item_type_data = types::extract_types(&old_module_info.items);
+          let new_item_type_data = types::extract_types(&new_module_info.items);
+          for old_data in old_item_type_data.iter() {
+            let result = types::determine_compatibility(old_data, &new_item_type_data);
+            match result {
+              types::ResultDetermineCompatibility::Uncompatible(_new_data) => {
+                println!("Uncompatible: {mod_path_str}::({})", old_data.show_name());
+              }
+              types::ResultDetermineCompatibility::NotFound => {
+                println!(
+                  "Uncompatible: {mod_path_str}::({}) does not exist",
+                  old_data.show_name()
+                );
+              }
+              types::ResultDetermineCompatibility::Ok => {}
+            }
+          }
+        } else {
+          println!("Uncompatible: {mod_path_str} module does not exist")
+        }
       }
+    } else {
+      return Ok(());
     }
+  } else {
+    return Ok(());
   }
   Ok(())
 }
