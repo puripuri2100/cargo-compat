@@ -324,7 +324,7 @@ pub(crate) fn determine_compatibility(
             if let Some(new_v) = new_enum
               .variants
               .iter()
-              .find(|v| v.ident.clone() == old_enum.ident)
+              .find(|v| v.ident.clone() == old_v.ident)
             {
               if !fileds_eq(&old_v.fields, &new_v.fields) {
                 return ResultDetermineCompatibility::Uncompatible(ItemTypeData::Enum(
@@ -372,11 +372,13 @@ pub(crate) fn determine_compatibility(
           } else {
             false
           };
-          if (old_fn.is_async != new_fn.is_async)
-            || (old_fn.is_const != new_fn.is_const)
-            || return_ty_eq
-            || args_eq
+          if (old_fn.is_async == new_fn.is_async)
+            && (old_fn.is_const == new_fn.is_const)
+            && return_ty_eq
+            && args_eq
           {
+            return ResultDetermineCompatibility::Ok;
+          } else {
             return ResultDetermineCompatibility::Uncompatible(ItemTypeData::Fn(new_fn.clone()));
           }
         }
