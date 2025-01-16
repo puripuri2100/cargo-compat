@@ -73,11 +73,14 @@ pub(crate) fn get_mod_file(
   tree: &Tree,
   repo: &Repository,
 ) -> anyhow::Result<String> {
-  let p = p
-    .iter()
-    .map(|i| i.to_string())
-    .collect::<Vec<_>>()
-    .join("/");
+  let p = if p.is_empty() {
+    "lib".to_string()
+  } else {
+    p.iter()
+      .map(|i| i.to_string())
+      .collect::<Vec<_>>()
+      .join("/")
+  };
   let file_name_e2015 = Path::new(&p).join("mod.rs");
   let mut file_name_e2018 = Path::new(&p).to_path_buf();
   file_name_e2018.set_extension("rs");
